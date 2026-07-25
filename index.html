@@ -65,12 +65,23 @@ footer{text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16p
  padding:7px 12px; font-size:13px; cursor:pointer}
 .editform{display:none; margin-top:10px; border-top:1px dashed var(--line); padding-top:12px}
 .editform.open{display:block}
-.editform label{display:block; font-size:12px; color:var(--muted); margin:8px 0 3px}
-.editform input[type=text], .editform select, .editform textarea{
+.fform label{display:block; font-size:12px; color:var(--muted); margin:8px 0 3px}
+.fform input[type=text], .fform select, .fform textarea{
  width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; font-family:inherit; background:#fff; color:var(--ink)}
-.editform textarea{min-height:70px; resize:vertical}
+.fform textarea{min-height:70px; resize:vertical}
 .savebtn{margin-top:12px; background:var(--accent); color:#fff; border:none; padding:9px 16px; border-radius:9px; font-size:14px; font-weight:600; cursor:pointer}
 .savedmsg{font-size:12.5px; color:var(--ok); margin-left:10px}
+.actions{display:flex; gap:8px; flex-wrap:wrap}
+.newform{display:none; background:#fff; border:1px solid var(--line); border-radius:12px; margin:0 12px 12px; padding:12px 14px}
+.newform.open{display:block}
+.newform h3{margin:0 0 4px; font-size:16px}
+.formrow{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px}
+.formrow .savebtn{margin-top:0}
+.cancelbtn{background:none; border:1px solid var(--line); color:var(--muted); padding:9px 14px; border-radius:9px; font-size:14px; font-family:inherit; cursor:pointer}
+.delbtn{margin-top:12px; margin-left:10px; background:none; border:1px solid #e6bdad; color:#b5502a;
+ padding:9px 14px; border-radius:9px; font-size:13px; font-family:inherit; cursor:pointer}
+.errmsg{font-size:12.5px; color:var(--accent); font-weight:600}
+.badge.own{background:#e8eef5; color:#3f6184}
 </style>
 </head>
 <body>
@@ -86,13 +97,23 @@ footer{text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16p
 <div class="toolbar">
   <span class="count" id="count"></span>
   <label class="toggle"><input type="checkbox" id="offonly"> Csak a teljes (offline) receptek</label>
-  <button class="openbtn ghost" id="exportBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">⬇ Módosítások mentése fájlba</button>
+  <button class="openbtn ghost" id="newBtn" style="padding:7px 12px;font-size:12.5px;margin-top:0">➕ Új recept</button>
+  <div class="actions">
+    <button class="openbtn ghost" id="exportBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">⬇ Mentés fájlba</button>
+    <button class="openbtn ghost" id="resetBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">🧹 Módosítások eldobása</button>
+  </div>
 </div>
+<div class="newform fform" id="newform"></div>
 <div class="info" id="info">
   <b>Így használd:</b> a keresőbe írj be egy hozzávalót vagy nevet, vagy válassz kategóriát a szalagon.
   A <span style="color:#4a7c59;font-weight:600">zöld „Offline"</span> jelű receptek teljes szövege internet nélkül is megnyílik.
   A <span style="color:#b5502a;font-weight:600">„Link"</span> jelűeknél (főleg nosalty.hu) egy koppintás megnyitja az eredeti oldalt — ehhez net kell.
   A fotók megjelenéséhez szintén internet szükséges.
+  <br><br>
+  <b>Szerkesztés és új recept:</b> minden recept alján ott a <b>✏️ Szerkesztés</b>, a lista fölött pedig a <b>➕ Új recept</b> gomb.
+  A módosítások ennek a böngészőnek a tárolójába kerülnek — <b>nem</b> töltődnek fel maguktól a tárhelyre, és más eszközön nem látszanak.
+  Ha véglegesíteni szeretnéd őket, koppints a <b>⬇ Mentés fájlba</b> gombra, és töltsd fel a letöltött
+  <code>index.html</code>-t a tárhelyre (a részletes leírás a <code>README.md</code>-ben van).
 </div>
 <div class="wrap" id="list"></div>
 <footer>Kézzel írt receptek + kigyűjtött linkek egyben. Készült a levél alapján.</footer>
@@ -103,8 +124,11 @@ const EMOJI={'Levesek':'🍜','Saláták':'🥗','Édességek, sütemények':'�
  'Köretek, egytálételek':'🍚','Krémek, mártogatók':'🧀','Egyéb / főétel':'🍽️'};
 
 const STORAGE_KEY='receptek_overrides_v1';
+const NEW_KEY='receptek_uj_receptek_v1';
 let overrides=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');
+let added=JSON.parse(localStorage.getItem(NEW_KEY)||'[]');
 function persistOverrides(){localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));}
+function persistAdded(){localStorage.setItem(NEW_KEY, JSON.stringify(added));}
 function effective(r){return overrides[r.id] ? {...r, ...overrides[r.id]} : r;}
 function setOverride(id, patch){
  overrides[id]={...(overrides[id]||{}), ...patch};
@@ -113,14 +137,26 @@ function setOverride(id, patch){
  render();
 }
 
-let curCat='__ALL__', q='', offOnly=false;
+/* A saját recepteket a böngésző tárolója őrzi, amíg a frissített index.html fel nem kerül a tárhelyre.
+   Ha egy saját recept közben bekerült a beépített listába, a helyi másolatot elhagyjuk (nincs duplikáció). */
+function allRecipes(){
+ const baseIds=new Set(RECIPES.map(r=>r.id));
+ return RECIPES.concat(added.filter(r=>!baseIds.has(r.id)));
+}
+function isOwn(id){return added.some(r=>r.id===id) && !RECIPES.some(r=>r.id===id);}
+function nextId(){return allRecipes().reduce((m,r)=>Math.max(m, r.id||0), 9999)+1;}
+function categories(){return [...new Set(allRecipes().map(r=>effective(r).category))].sort();}
+
+let curCat='__ALL__', q='', offOnly=false, savedFlash=null;
+const openDetails=new Set();
 const list=document.getElementById('list'), chips=document.getElementById('chips'),
  countEl=document.getElementById('count'), search=document.getElementById('search'),
  clearBtn=document.getElementById('clear'), offBox=document.getElementById('offonly'),
- exportBtn=document.getElementById('exportBtn');
+ exportBtn=document.getElementById('exportBtn'), newBtn=document.getElementById('newBtn'),
+ resetBtn=document.getElementById('resetBtn'), newForm=document.getElementById('newform');
 
 function buildCategoryChips(){
- const cats=['__ALL__'].concat([...new Set(RECIPES.map(r=>effective(r).category))].sort());
+ const cats=['__ALL__'].concat(categories());
  if(curCat!=='__ALL__' && !cats.includes(curCat)) curCat='__ALL__';
  chips.innerHTML='';
  cats.forEach(c=>{const el=document.createElement('div');el.className='chip'+(c==curCat?' active':'');
@@ -146,14 +182,20 @@ function card(base){
  const thumb = r.image ? `<div class="thumb" style="background-image:url('${esc(r.image)}')"></div>`
    : `<div class="thumb empty">${EMOJI[r.category]||'🍽️'}</div>`;
  const badge = r.offline ? '<span class="badge off">✓ Offline</span>' : '<span class="badge link">Link</span>';
+ const own = isOwn(base.id) ? '<span class="badge own">★ Saját</span>' : '';
  div.innerHTML =
   `<div class="top"><div class="thumb-holder">${thumb}</div>
     <div class="cbody"><p class="ctitle">${esc(r.title)}</p>
-    <div class="meta"><span class="badge">${EMOJI[r.category]||''} ${esc(r.category)}</span>${badge}</div>
+    <div class="meta"><span class="badge">${EMOJI[r.category]||''} ${esc(r.category)}</span>${badge}${own}</div>
     ${r.source?`<div class="src">${esc(r.source)}</div>`:''}</div></div>
    <div class="detail"></div>`;
+ div.dataset.id=base.id;
  const top=div.querySelector('.top'), det=div.querySelector('.detail');
- top.onclick=()=>{ if(!det.dataset.built){ det.innerHTML=body(base); det.dataset.built='1'; } det.classList.toggle('open'); };
+ if(openDetails.has(base.id)){ det.innerHTML=body(base); det.classList.add('open'); }
+ top.onclick=()=>{
+  if(openDetails.has(base.id)){ openDetails.delete(base.id); det.classList.remove('open'); }
+  else { openDetails.add(base.id); det.innerHTML=body(base); det.classList.add('open'); }
+ };
  return div;
 }
 function body(base){
@@ -167,40 +209,139 @@ function body(base){
  h+=editSection(base.id, r);
  return h;
 }
-function editSection(id, r){
- const catOptions=[...new Set(RECIPES.map(x=>effective(x).category))].sort()
-   .map(c=>`<option value="${esc(c)}"${c===r.category?' selected':''}>${esc(c)}</option>`).join('')
+function catSelect(cls, selected){
+ const opts=categories().map(c=>`<option value="${esc(c)}"${c===selected?' selected':''}>${esc(c)}</option>`).join('')
    +'<option value="__NEW__">+ Új kategória…</option>';
+ return `<select class="${cls}" onchange="askNewCategory(this)">${opts}</select>`;
+}
+function askNewCategory(sel){
+ if(sel.value!=='__NEW__') return;
+ const n=(prompt('Új kategória neve:')||'').trim();
+ if(n){const o=document.createElement('option'); o.value=n; o.textContent=n; o.selected=true; sel.insertBefore(o, sel.lastElementChild);}
+ else sel.selectedIndex=0;
+}
+function editSection(id, r){
+ const flashed = savedFlash===id;
+ const del = isOwn(id) ? `<button type="button" class="delbtn" onclick="deleteOwn(${id})">🗑 Recept törlése</button>` : '';
  return `
   <button type="button" class="editToggle" onclick="this.nextElementSibling.classList.toggle('open')">✏️ Szerkesztés</button>
-  <div class="editform">
+  <div class="editform fform${flashed?' open':''}">
    <label>Cím</label>
    <input type="text" class="e-title" value="${esc(r.title)}">
    <label>Kategória</label>
-   <select class="e-cat" onchange="if(this.value==='__NEW__'){const n=prompt('Új kategória neve:');if(n){const o=document.createElement('option');o.value=n;o.textContent=n;o.selected=true;this.insertBefore(o,this.lastElementChild);}else{this.selectedIndex=0;}}">${catOptions}</select>
+   ${catSelect('e-cat', r.category)}
    <label>Hozzávalók (soronként egy tétel)</label>
    <textarea class="e-ing">${esc((r.ingredients||[]).join('\n'))}</textarea>
    <label>Elkészítés (soronként egy lépés)</label>
    <textarea class="e-steps">${esc((r.steps||[]).join('\n'))}</textarea>
-   <button type="button" class="savebtn" onclick="saveEdit(${id}, this.closest('.editform'))">Mentés</button>
+   <label>Megjegyzés (nem kötelező)</label>
+   <textarea class="e-note">${esc(r.note||'')}</textarea>
+   <label>Eredeti link (nem kötelező)</label>
+   <input type="text" class="e-url" value="${esc(r.url||'')}">
+   <button type="button" class="savebtn" onclick="saveEdit(${id}, this.closest('.editform'))">Mentés</button>${flashed?'<span class="savedmsg">✓ Mentve</span>':''}${del}
   </div>`;
 }
+function readForm(form, p){
+ return {
+  title: form.querySelector('.'+p+'title').value.trim(),
+  category: form.querySelector('.'+p+'cat').value,
+  ingredients: splitLines(form.querySelector('.'+p+'ing').value),
+  steps: splitLines(form.querySelector('.'+p+'steps').value),
+  note: form.querySelector('.'+p+'note').value.trim(),
+  url: form.querySelector('.'+p+'url').value.trim()
+ };
+}
+function splitLines(v){return v.split('\n').map(s=>s.trim()).filter(Boolean);}
 function saveEdit(id, form){
- const title=form.querySelector('.e-title').value.trim();
- const category=form.querySelector('.e-cat').value;
- const ingredients=form.querySelector('.e-ing').value.split('\n').map(s=>s.trim()).filter(Boolean);
- const steps=form.querySelector('.e-steps').value.split('\n').map(s=>s.trim()).filter(Boolean);
- const patch={title, category, ingredients, steps};
- if(ingredients.length||steps.length){patch.offline=true; patch.status='full';}
- setOverride(id, patch);
+ const patch=readForm(form, 'e-');
+ if(!patch.title){alert('A cím nem lehet üres.');return;}
+ if(patch.category==='__NEW__'){alert('Adj nevet az új kategóriának.');return;}
+ if(patch.ingredients.length||patch.steps.length){patch.offline=true; patch.status='full';}
+ savedFlash=id;
+ if(isOwn(id)){
+   added=added.map(r=>r.id===id ? {...r, ...patch} : r);
+   persistAdded();
+   buildCategoryChips();
+   render();
+ } else {
+   setOverride(id, patch);
+ }
+ savedFlash=null;
+}
+
+/* ---- Új recept felvitele ---- */
+function buildNewForm(msg){
+ newForm.innerHTML=`
+  <h3>➕ Új recept</h3>
+  ${msg?`<span class="savedmsg" style="margin-left:0">${esc(msg)}</span>`:'<div class="count">A csillaggal jelölt mező kötelező.</div>'}
+  <label>Cím *</label>
+  <input type="text" class="n-title" placeholder="pl. Nagyi almás pitéje">
+  <label>Kategória</label>
+  ${catSelect('n-cat', curCat==='__ALL__'?categories()[0]:curCat)}
+  <label>Hozzávalók (soronként egy tétel)</label>
+  <textarea class="n-ing" placeholder="500 g liszt&#10;2 db tojás&#10;1 cs sütőpor"></textarea>
+  <label>Elkészítés (soronként egy lépés)</label>
+  <textarea class="n-steps" placeholder="A lisztet elmorzsoljuk a vajjal.&#10;180 fokon 30 percig sütjük."></textarea>
+  <label>Megjegyzés (nem kötelező)</label>
+  <textarea class="n-note" placeholder="pl. Anyu receptje, dupla adaggal is jó."></textarea>
+  <label>Eredeti link (nem kötelező)</label>
+  <input type="text" class="n-url" placeholder="https://…">
+  <div class="formrow">
+   <button type="button" class="savebtn" onclick="createRecipe(this.closest('.newform'))">Recept hozzáadása</button>
+   <button type="button" class="cancelbtn" onclick="toggleNewForm(false)">Mégse</button>
+   <span class="errmsg" id="newerr"></span>
+  </div>`;
+}
+function toggleNewForm(open){
+ if(open){buildNewForm(); newForm.classList.add('open'); newForm.querySelector('.n-title').focus();}
+ else {newForm.classList.remove('open'); newForm.innerHTML='';}
+}
+function createRecipe(form){
+ const data=readForm(form, 'n-');
+ const err=form.querySelector('#newerr');
+ if(!data.title){err.textContent='A cím megadása kötelező.'; form.querySelector('.n-title').focus(); return;}
+ if(data.category==='__NEW__'){err.textContent='Adj nevet az új kategóriának.'; return;}
+ const full=data.ingredients.length>0 || data.steps.length>0;
+ added.push({
+  id: nextId(), title: data.title, category: data.category || 'Egyéb / főétel',
+  url: data.url, source: 'Saját recept', ingredients: data.ingredients, steps: data.steps,
+  image: '', note: data.note, status: full?'full':'stub', offline: full
+ });
+ persistAdded();
+ buildCategoryChips();
+ render();
+ buildNewForm('✓ Hozzáadva: '+data.title+' — jöhet a következő.');
+ newForm.querySelector('.n-title').focus();
+}
+function deleteOwn(id){
+ const r=added.find(x=>x.id===id);
+ if(!r || !confirm('Törlöd ezt a saját receptet?\n\n'+r.title)) return;
+ added=added.filter(x=>x.id!==id);
+ delete overrides[id];
+ persistAdded(); persistOverrides();
+ openDetails.delete(id);
+ buildCategoryChips();
+ render();
+}
+function resetLocal(){
+ if(!confirm('Minden helyi módosítás és saját recept törlődik ebből a böngészőből.\nAmit már feltöltöttél a tárhelyre, az megmarad.\n\nFolytatod?')) return;
+ overrides={}; added=[];
+ persistOverrides(); persistAdded();
+ openDetails.clear();
+ toggleNewForm(false);
+ buildCategoryChips();
+ render();
 }
 function render(){
- const items=RECIPES.filter(matches);
+ const all=allRecipes();
+ const items=all.filter(matches);
  list.innerHTML='';
  countEl.textContent=items.length+' recept';
- const offCount=RECIPES.filter(r=>effective(r).offline).length;
- document.getElementById('sub').textContent=RECIPES.length+' recept · '+offCount+' teljes szöveggel (offline)';
- exportBtn.style.display=Object.keys(overrides).length?'inline-block':'none';
+ const offCount=all.filter(r=>effective(r).offline).length;
+ document.getElementById('sub').textContent=all.length+' recept · '+offCount+' teljes szöveggel (offline)';
+ const dirty=Object.keys(overrides).length || added.length;
+ exportBtn.style.display=dirty?'inline-block':'none';
+ resetBtn.style.display=dirty?'inline-block':'none';
  if(!items.length){list.innerHTML='<div class="empty-state">Nincs találat. Próbálj más keresőszót vagy kategóriát.</div>';return;}
  const frag=document.createDocumentFragment();
  items.forEach(r=>frag.appendChild(card(r)));
@@ -208,11 +349,16 @@ function render(){
 }
 function exportHtml(){
  const clone=document.documentElement.cloneNode(true);
+ // A dinamikusan generált részek nem kerülnek a fájlba, különben minden mentésnél hízna.
+ ['list','chips','newform'].forEach(id=>{const el=clone.querySelector('#'+id); if(el) el.innerHTML='';});
+ const nf=clone.querySelector('#newform'); if(nf) nf.classList.remove('open');
  const script=clone.querySelector('#data');
- const merged=RECIPES.map(effective);
+ const merged=allRecipes().map(effective);
+ // A "</" jelsorozatot elrejtjük, hogy egy saját szövegbe írt záró script-tag ne törje el a fájlt.
+ const json=JSON.stringify(merged).replace(/<\//g,'<\\/');
  script.textContent=script.textContent.replace(
    /const RECIPES\s*=\s*\[[\s\S]*?\];/,
-   'const RECIPES = '+JSON.stringify(merged)+';'
+   'const RECIPES = '+json+';'
  );
  const blob=new Blob(['<!DOCTYPE html>\n'+clone.outerHTML], {type:'text/html'});
  const url=URL.createObjectURL(blob);
@@ -223,6 +369,8 @@ search.addEventListener('input',()=>{q=search.value.trim().toLowerCase();clearBt
 clearBtn.onclick=()=>{search.value='';q='';clearBtn.style.display='none';render();search.focus();};
 offBox.addEventListener('change',()=>{offOnly=offBox.checked;render();});
 exportBtn.addEventListener('click', exportHtml);
+newBtn.addEventListener('click', ()=>toggleNewForm(!newForm.classList.contains('open')));
+resetBtn.addEventListener('click', resetLocal);
 render();
 </script>
 </body>
