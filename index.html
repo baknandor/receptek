@@ -81,6 +81,10 @@ footer{text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16p
 .delbtn{margin-top:12px; margin-left:10px; background:none; border:1px solid #e6bdad; color:#b5502a;
  padding:9px 14px; border-radius:9px; font-size:13px; font-family:inherit; cursor:pointer}
 .errmsg{font-size:12.5px; color:var(--accent); font-weight:600}
+.uploadmsg{font-size:12.5px; color:var(--muted); align-self:center; flex-basis:100%}
+.uploadmsg.ok{color:var(--ok); font-weight:600}
+.uploadmsg.err{color:var(--accent); font-weight:600}
+.keybtn{padding:7px 10px !important}
 .badge.own{background:#e8eef5; color:#3f6184}
 </style>
 </head>
@@ -99,8 +103,11 @@ footer{text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16p
   <label class="toggle"><input type="checkbox" id="offonly"> Csak a teljes (offline) receptek</label>
   <button class="openbtn ghost" id="newBtn" style="padding:7px 12px;font-size:12.5px;margin-top:0">➕ Új recept</button>
   <div class="actions">
+    <button class="openbtn" id="uploadBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">☁ Feltöltés a tárhelyre</button>
+    <button class="openbtn ghost keybtn" id="tokenBtn" style="display:none;font-size:12.5px;margin-top:0" title="GitHub token beállítása vagy törlése">🔑</button>
     <button class="openbtn ghost" id="exportBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">⬇ Mentés fájlba</button>
     <button class="openbtn ghost" id="resetBtn" style="display:none;padding:7px 12px;font-size:12.5px;margin-top:0">🧹 Módosítások eldobása</button>
+    <span class="uploadmsg" id="uploadmsg"></span>
   </div>
 </div>
 <div class="newform fform" id="newform"></div>
@@ -111,9 +118,10 @@ footer{text-align:center; font-size:11.5px; color:var(--muted); padding:20px 16p
   A fotók megjelenéséhez szintén internet szükséges.
   <br><br>
   <b>Szerkesztés és új recept:</b> minden recept alján ott a <b>✏️ Szerkesztés</b>, a lista fölött pedig a <b>➕ Új recept</b> gomb.
-  A módosítások ennek a böngészőnek a tárolójába kerülnek — <b>nem</b> töltődnek fel maguktól a tárhelyre, és más eszközön nem látszanak.
-  Ha véglegesíteni szeretnéd őket, koppints a <b>⬇ Mentés fájlba</b> gombra, és töltsd fel a letöltött
-  <code>index.html</code>-t a tárhelyre (a részletes leírás a <code>README.md</code>-ben van).
+  A módosítások először ennek a böngészőnek a tárolójába kerülnek, és más eszközön nem látszanak.
+  Ha véglegesíteni szeretnéd őket, két út van: a <b>☁ Feltöltés a tárhelyre</b> gomb egy lépésben kiteszi őket az élő oldalra
+  (ehhez egyszer meg kell adni egy GitHub tokent a <b>🔑</b> gombbal), a <b>⬇ Mentés fájlba</b> pedig letölti az új
+  <code>index.html</code>-t, amit kézzel tölthetsz fel. A részletes leírás a <code>README.md</code>-ben van.
 </div>
 <div class="wrap" id="list"></div>
 <footer>Kézzel írt receptek + kigyűjtött linkek egyben. Készült a levél alapján.</footer>
@@ -129,6 +137,25 @@ let overrides=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}');
 let added=JSON.parse(localStorage.getItem(NEW_KEY)||'[]');
 function persistOverrides(){localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));}
 function persistAdded(){localStorage.setItem(NEW_KEY, JSON.stringify(added));}
+
+/* Betöltéskor kidobjuk a helyi tárolóból azt, ami már bekerült a fájlba: a feltöltött
+   saját recepteket és azokat a módosításokat, amiket a fájl már tartalmaz. Enélkül a
+   "van mentendő módosításod" jelzés sikeres feltöltés után is égve maradna. */
+function pruneStored(){
+ const before=added.length+Object.keys(overrides).length;
+ const baseIds=new Set(RECIPES.map(r=>r.id));
+ added=added.filter(r=>!baseIds.has(r.id));
+ const byId=new Map(RECIPES.map(r=>[String(r.id), r]));
+ Object.keys(overrides).forEach(id=>{
+  const base=byId.get(id);
+  if(!base){ if(!added.some(r=>String(r.id)===id)) delete overrides[id]; return; }
+  const patch=overrides[id]||{};
+  const same=Object.keys(patch).every(k=>JSON.stringify(base[k])===JSON.stringify(patch[k]));
+  if(same) delete overrides[id];
+ });
+ if(before!==added.length+Object.keys(overrides).length){persistAdded(); persistOverrides();}
+}
+pruneStored();
 function effective(r){return overrides[r.id] ? {...r, ...overrides[r.id]} : r;}
 function setOverride(id, patch){
  overrides[id]={...(overrides[id]||{}), ...patch};
@@ -153,7 +180,9 @@ const list=document.getElementById('list'), chips=document.getElementById('chips
  countEl=document.getElementById('count'), search=document.getElementById('search'),
  clearBtn=document.getElementById('clear'), offBox=document.getElementById('offonly'),
  exportBtn=document.getElementById('exportBtn'), newBtn=document.getElementById('newBtn'),
- resetBtn=document.getElementById('resetBtn'), newForm=document.getElementById('newform');
+ resetBtn=document.getElementById('resetBtn'), newForm=document.getElementById('newform'),
+ uploadBtn=document.getElementById('uploadBtn'), tokenBtn=document.getElementById('tokenBtn'),
+ uploadMsgEl=document.getElementById('uploadmsg');
 
 function buildCategoryChips(){
  const cats=['__ALL__'].concat(categories());
@@ -342,16 +371,24 @@ function render(){
  const dirty=Object.keys(overrides).length || added.length;
  exportBtn.style.display=dirty?'inline-block':'none';
  resetBtn.style.display=dirty?'inline-block':'none';
+ uploadBtn.style.display=dirty?'inline-block':'none';
+ tokenBtn.style.display=dirty?'inline-block':'none';
+ if(!dirty) uploadMsg('','');
  if(!items.length){list.innerHTML='<div class="empty-state">Nincs találat. Próbálj más keresőszót vagy kategóriát.</div>';return;}
  const frag=document.createDocumentFragment();
  items.forEach(r=>frag.appendChild(card(r)));
  list.appendChild(frag);
 }
-function exportHtml(){
+function buildHtml(){
  const clone=document.documentElement.cloneNode(true);
  // A dinamikusan generált részek nem kerülnek a fájlba, különben minden mentésnél hízna.
- ['list','chips','newform'].forEach(id=>{const el=clone.querySelector('#'+id); if(el) el.innerHTML='';});
+ ['list','chips','newform','uploadmsg'].forEach(id=>{const el=clone.querySelector('#'+id); if(el) el.innerHTML='';});
  const nf=clone.querySelector('#newform'); if(nf) nf.classList.remove('open');
+ const um=clone.querySelector('#uploadmsg'); if(um) um.className='uploadmsg';
+ // A gombok pillanatnyi állapota se ragadjon bele a fájlba: betöltéskor a render() dönti el.
+ ['uploadBtn','tokenBtn','exportBtn','resetBtn'].forEach(id=>{
+   const el=clone.querySelector('#'+id); if(el){el.style.display='none'; el.removeAttribute('disabled');}
+ });
  const script=clone.querySelector('#data');
  const merged=allRecipes().map(effective);
  // A "</" jelsorozatot elrejtjük, hogy egy saját szövegbe írt záró script-tag ne törje el a fájlt.
@@ -360,15 +397,105 @@ function exportHtml(){
    /const RECIPES\s*=\s*\[[\s\S]*?\];/,
    'const RECIPES = '+json+';'
  );
- const blob=new Blob(['<!DOCTYPE html>\n'+clone.outerHTML], {type:'text/html'});
+ return '<!DOCTYPE html>\n'+clone.outerHTML;
+}
+function exportHtml(){
+ const blob=new Blob([buildHtml()], {type:'text/html'});
  const url=URL.createObjectURL(blob);
  const a=document.createElement('a'); a.href=url; a.download='index.html'; a.click();
  URL.revokeObjectURL(url);
+}
+
+/* ---- Feltöltés egyenesen a tárhelyre (GitHub Contents API) ----
+   A token kizárólag ennek a böngészőnek a localStorage-ában él; a buildHtml()
+   a DOM-ból dolgozik, a token pedig nincs a DOM-ban, tehát a feltöltött
+   publikus index.html-be soha nem kerül bele. */
+const GH={owner:'baknandor', repo:'receptek', branch:'main', path:'index.html'};
+const TOKEN_KEY='receptek_gh_token_v1';
+function ghToken(){return localStorage.getItem(TOKEN_KEY)||'';}
+function askToken(){
+ const t=prompt(
+  'GitHub token a feltöltéshez.\n\n'+
+  'Fine-grained token, csak a "'+GH.repo+'" repóhoz, Contents: Read and write joggal.\n'+
+  'Ebben a böngészőben marad, a feltöltött oldalba nem kerül bele.\n\n'+
+  'Ha üresen hagyod, a tárolt token törlődik.',
+  ghToken()
+ );
+ if(t===null) return '';
+ const v=t.trim();
+ if(!v){localStorage.removeItem(TOKEN_KEY); uploadMsg('A tárolt token törölve.',''); return '';}
+ localStorage.setItem(TOKEN_KEY, v);
+ uploadMsg('Token elmentve ebben a böngészőben.','ok');
+ return v;
+}
+function uploadMsg(text, kind){
+ uploadMsgEl.textContent=text||'';
+ uploadMsgEl.className='uploadmsg'+(kind?' '+kind:'');
+}
+function b64utf8(str){
+ // Az ékezetek miatt UTF-8 bájtokra bontunk; a darabolás a nagy fájl miatt kell.
+ const bytes=new TextEncoder().encode(str);
+ let bin='';
+ for(let i=0;i<bytes.length;i+=0x8000) bin+=String.fromCharCode.apply(null, bytes.subarray(i, i+0x8000));
+ return btoa(bin);
+}
+function ghFetch(url, opts, token){
+ opts=opts||{};
+ return fetch(url, {...opts, cache:'no-store', headers:{
+   'Authorization':'Bearer '+token,
+   'Accept':'application/vnd.github+json',
+   'X-GitHub-Api-Version':'2022-11-28',
+   ...(opts.headers||{})
+ }});
+}
+function commitMessage(){
+ const parts=[];
+ if(added.length) parts.push(added.length+' új recept');
+ const n=Object.keys(overrides).length;
+ if(n) parts.push(n+' módosított recept');
+ return 'Receptek frissítése'+(parts.length?' — '+parts.join(', '):'');
+}
+async function uploadToGitHub(){
+ let token=ghToken();
+ if(!token){token=askToken(); if(!token) return;}
+ const api='https://api.github.com/repos/'+GH.owner+'/'+GH.repo+'/contents/'+GH.path;
+ uploadBtn.disabled=true;
+ uploadMsg('Feltöltés…','');
+ try{
+  const cur=await ghFetch(api+'?ref='+GH.branch, {}, token);
+  if(cur.status===401){
+    localStorage.removeItem(TOKEN_KEY);
+    throw new Error('A token érvénytelen vagy lejárt — töröltem. Koppints a 🔑 gombra, és add meg az újat.');
+  }
+  if(cur.status===403) throw new Error('A token nem kapott írási jogot ehhez a repóhoz (Contents: Read and write kell).');
+  if(cur.status===404) throw new Error('Nem található: '+GH.owner+'/'+GH.repo+'/'+GH.path+' a(z) '+GH.branch+' ágon. Hozzáfér a token ehhez a repóhoz?');
+  if(!cur.ok) throw new Error('GitHub hiba ('+cur.status+') a fájl lekérésekor.');
+  const sha=(await cur.json()).sha;
+  const res=await ghFetch(api, {
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message:commitMessage(), content:b64utf8(buildHtml()), sha:sha, branch:GH.branch})
+  }, token);
+  if(res.status===409) throw new Error('A tárhelyen közben megváltozott a fájl. Töltsd újra az oldalt, és próbáld megint.');
+  if(!res.ok){
+    let d=''; try{d=(await res.json()).message||'';}catch(e){}
+    throw new Error('A feltöltés nem sikerült ('+res.status+'). '+d);
+  }
+  uploadMsg('✓ Feltöltve. Az élő oldal kb. egy percen belül frissül — utána töltsd újra.','ok');
+ }catch(err){
+  // A fetch hálózati hibánál TypeError-t dob; a helyi módosítások ilyenkor is megmaradnak.
+  const net = err instanceof TypeError;
+  uploadMsg('⚠ '+(net?'Nem sikerült elérni a GitHubot — nézd meg az internetkapcsolatot. A módosításaid megmaradtak.':err.message),'err');
+ }finally{
+  uploadBtn.disabled=false;
+ }
 }
 search.addEventListener('input',()=>{q=search.value.trim().toLowerCase();clearBtn.style.display=q?'block':'none';render();});
 clearBtn.onclick=()=>{search.value='';q='';clearBtn.style.display='none';render();search.focus();};
 offBox.addEventListener('change',()=>{offOnly=offBox.checked;render();});
 exportBtn.addEventListener('click', exportHtml);
+uploadBtn.addEventListener('click', uploadToGitHub);
+tokenBtn.addEventListener('click', askToken);
 newBtn.addEventListener('click', ()=>toggleNewForm(!newForm.classList.contains('open')));
 resetBtn.addEventListener('click', resetLocal);
 render();

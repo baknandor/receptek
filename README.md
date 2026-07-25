@@ -5,7 +5,7 @@ Egyfájlos, offline is működő receptgyűjtemény (`index.html`). Nincs hozzá
 `const RECIPES = [...]` tömbjében.
 
 **Funkciók:** keresés, kategóriaszűrés, offline receptek szűrése, receptek szerkesztése,
-új receptek felvitele, a módosítások kimentése fájlba.
+új receptek felvitele, a módosítások **feltöltése egy gombbal** a tárhelyre, illetve kimentése fájlba.
 
 ---
 
@@ -16,7 +16,9 @@ Egyfájlos, offline is működő receptgyűjtemény (`index.html`). Nincs hozzá
 | Meglévő recept módosítása | Nyisd meg a receptet → **✏️ Szerkesztés** |
 | Új recept felvitele | A lista fölötti **➕ Új recept** gomb |
 | Saját recept törlése | A saját recept szerkesztő paneljén → **🗑 Recept törlése** |
-| Módosítások kimentése | **⬇ Mentés fájlba** (csak ha van módosítás) |
+| **Közzététel egy gombbal** | **☁ Feltöltés a tárhelyre** (csak ha van módosítás) |
+| GitHub token megadása/törlése | **🔑** gomb a feltöltés mellett |
+| Módosítások kimentése fájlba | **⬇ Mentés fájlba** (csak ha van módosítás) |
 | Helyi módosítások eldobása | **🧹 Módosítások eldobása** |
 
 Szerkeszthető mezők: cím, kategória (új kategória is felvehető), hozzávalók, elkészítés,
@@ -32,54 +34,75 @@ Csak a saját receptek törölhetők — a beépítettek nem, azokat legfeljebb 
 
 ### A rövid válasz
 
-**Magától nem kerül fel.** Ez egy statikus HTML-fájl, ami a böngészőben fut, szerver nélkül.
-A módosításokat a böngésző saját tárolója (`localStorage`) őrzi, két kulcs alatt:
+A szerkesztés először **csak a böngésződben** él: a módosításokat a `localStorage` őrzi,
+két kulcs alatt (`receptek_overrides_v1` = meglévő receptek módosításai,
+`receptek_uj_receptek_v1` = a felvitt új receptek). Ez addig azt jelenti, hogy más eszközön
+nem látszik, és a böngésző adatainak törlésével elveszne.
 
-- `receptek_overrides_v1` — a meglévő receptek módosításai
-- `receptek_uj_receptek_v1` — a felvitt új receptek
+Innen kétféleképpen lehet közzétenni:
 
-Ez azt jelenti, hogy:
+| | **☁ Feltöltés a tárhelyre** | **⬇ Mentés fájlba** |
+|---|---|---|
+| Mit csinál | egyenesen a repóba commitol a GitHub API-val | letölt egy kész `index.html`-t |
+| Hány lépés | egy koppintás | letöltés + kézi feltöltés |
+| Mit kér egyszer | egy GitHub tokent (lásd lentebb) | semmit |
+| Kell hozzá net | igen | csak a feltöltéshez |
 
-- a módosítás **csak abban a böngészőben** látszik, ahol beírtad (a telefonodon felvitt recept
-  a laptopodon nem lesz ott),
-- ha törlöd a böngésző adatait vagy privát ablakot használsz, **elveszik**,
-- **más nem látja**, aki megnyitja az oldalt a tárhelyről.
-
-Ezért a szerkesztésnek van egy záró lépése: a **⬇ Mentés fájlba** gomb legenerál
-egy új `index.html`-t, amiben a módosítások már bele vannak írva a `RECIPES` tömbbe. Ezt a
-fájlt kell feltölteni a tárhelyre — onnantól mindenki, minden eszközön azt látja.
+A két út ugyanazt a fájlt állítja elő — a **⬇ Mentés fájlba** végig megmarad tartaléknak,
+például ha nincs kéznél a token, vagy ha nem GitHub Pages-re publikálsz.
 
 ### A teljes útvonal
 
 ```
-böngésző (localStorage)          →  index.html fájl        →  git repó       →  élő oldal
-  szerkesztés / új recept           ⬇ mentés fájlba           feltöltés         GitHub Pages
-        [kézi]                          [kézi]                  [kézi]        [ez automatikus]
+böngésző (localStorage)  →  index.html  →  git repó  →  élő oldal
+  szerkesztés / új recept                               GitHub Pages
+
+  ☁ Feltöltés:      [───────── egy gomb ─────────]  →  [automatikus]
+  ⬇ Mentés fájlba:  [ kézi ]     [ kézi feltöltés ]  →  [automatikus]
 ```
 
 Az utolsó lépés — repó → élő oldal — **automatikus**, ha az oldalt GitHub Pages szolgálja ki:
-minden `main`-re érkező push után pár tíz másodpercen belül frissül az oldal, nincs vele
-további dolgod. Ami *nem* automatikus, az a böngésződ és a repó közötti két lépés.
+minden `main`-re érkező push után pár tíz másodpercen belül frissül az oldal.
 
-Ha az oldal nem GitHub Pages-en, hanem hagyományos webtárhelyen fut, akkor az utolsó lépés
-is kézi: a letöltött `index.html`-t oda kell feltölteni (FTP-vel vagy a szolgáltató
-fájlkezelőjével), a repó ilyenkor csak a változások nyilvántartása.
+Ha az oldal nem GitHub Pages-en, hanem hagyományos webtárhelyen fut, a ☁ gomb a repót
+frissíti, de az élő oldalt nem — oda a letöltött `index.html`-t kell kitenni (FTP-vel vagy a
+szolgáltató fájlkezelőjével).
 
-### Feltöltés a gyakorlatban
+### A ☁ feltöltés beállítása (egyszeri)
 
-**Telefonról (a legegyszerűbb út):**
+1. GitHubon: **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**
+2. **Repository access:** *Only select repositories* → `receptek` — semmi más.
+3. **Permissions → Repository permissions → Contents:** *Read and write*.
+   Több jog nem kell.
+4. Adj neki lejárati időt (pl. 90 nap), és másold ki a tokent — csak egyszer mutatja meg.
+5. Az oldalon szerkessz valamit, majd koppints a **🔑** gombra, és illeszd be a tokent.
+   Ettől kezdve a **☁ Feltöltés a tárhelyre** magától commitol.
+
+A token **ennek a böngészőnek** a `localStorage`-ában marad, és soha nem kerül bele a
+feltöltött `index.html`-be (a fájlt a program a DOM-ból építi, a token pedig nincs a DOM-ban).
+Viszont aki hozzáfér a feloldott telefonodhoz, ki tudja olvasni — ezért fontos a szűk
+jogosultság és a lejárati idő. A tokent a **🔑** gombbal bármikor lecserélheted; ha üresen
+hagyod a mezőt, törlődik. Lejárt tokennél a program magától törli, és szól, hogy adj újat.
+
+Feltöltés után az oldal kb. egy perc múlva frissül. Ha újratöltöd, a program észreveszi,
+hogy a helyi módosítások már bekerültek a fájlba, és **magától kipucolja a böngésző
+tárolóját** — ezért tűnnek el a gombok. Duplikáció nem keletkezik.
+
+### A kézi út (ha nincs token, vagy nem GitHub Pages a tárhely)
+
+**Telefonról:**
 
 1. Koppints a **⬇ Mentés fájlba** gombra → letöltődik egy `index.html`.
 2. Nyisd meg a repót: `github.com/baknandor/receptek`
 3. **Add file → Upload files**, húzd/válaszd be a letöltött `index.html`-t.
 4. **Commit changes.** A régi fájlt felülírja — ugyanaz a név, ezért nem lesz kettő belőle.
 5. Fél perc múlva töltsd újra az élő oldalt.
-6. Ha minden a helyén van, a **🧹 Módosítások eldobása** gombbal kipucolhatod a
-   böngésző tárolóját — a receptek megmaradnak, hiszen már a fájlban vannak.
 
-A 6. lépés nem kötelező: a program felismeri, ha egy helyben tárolt recept már bekerült a
-feltöltött fájlba, és ilyenkor a helyi másolatot elhagyja, tehát **nem duplázódnak** a receptek.
-A 🧹 csak azért hasznos, hogy a „van mentendő módosításod" jelzés eltűnjön.
+A **🧹 Módosítások eldobása** gombra itt sincs szükség: újratöltéskor a program felismeri,
+hogy a helyi másolatok már a fájlban vannak, és magától elhagyja őket — a receptek nem
+duplázódnak, a jelzés pedig eltűnik. A 🧹 arra való, ha *el akarod dobni* a helyi
+módosításokat anélkül, hogy közzétennéd őket.
 
 **Gépről:**
 
@@ -92,31 +115,27 @@ git push
 
 ---
 
-## Lehet ezt teljesen automatikussá tenni?
+## Miért kell token, és mi lenne még lehetséges?
 
-Igen, de mindegyik megoldás hoz magával valamit. Statikus fájl önmagában nem tud a
-tárhelyre írni: ahhoz kell egy hitelesítés (token), azt pedig **nem lehet magába a publikus
-`index.html`-be beírni** — aki megnyitja az oldalt, elolvashatja, és a GitHub az ilyen
-tokent amúgy is azonnal visszavonja.
+Statikus fájl önmagában nem tud a tárhelyre írni: ahhoz kell egy hitelesítés. Azt viszont
+**nem lehet magába a publikus `index.html`-be beírni** — aki megnyitja az oldalt,
+elolvashatná, és a GitHub az így kiszivárgott tokent amúgy is azonnal visszavonja. Ezért
+kerül a token a böngésző tárolójába, ahol csak te férsz hozzá.
 
 | Megoldás | Hogyan | Mit kér | Kinek jó |
 |---|---|---|---|
-| **A. Kézi feltöltés** (a mostani) | ⬇ mentés → upload | semmit | ha ritkán módosítasz |
-| **B. Token a böngészőben** | egyszer beírsz egy GitHub tokent, utána egy „☁ Feltöltés" gomb a GitHub API-val magától commitol | fine-grained token, csak erre a repóra, `contents: write` | ha egyedül szerkeszted, a saját telefonodon/gépeden |
-| **C. Köztes szolgáltatás** | egy Cloudflare Worker / Netlify Function tartja a tokent, az oldal csak jelszót küld neki | ~30 sor plusz kód és egy ingyenes fiók | ha többen szerkesztitek |
+| **A. Kézi feltöltés** | ⬇ mentés → upload | semmit | ha ritkán módosítasz, vagy nincs kéznél token |
+| **B. Token a böngészőben** ✅ *ez van beépítve* | ☁ gomb, GitHub Contents API | fine-grained token, csak erre a repóra, `Contents: write` | ha egyedül szerkeszted, a saját eszközödön |
+| **C. Köztes szolgáltatás** | egy Cloudflare Worker / Netlify Function tartja a tokent, az oldal csak jelszót küld neki | ~30 sor plusz kód és egy ingyenes fiók | ha többen szerkesztitek, és nem akartok fejenként tokent |
 | **D. Adatbázis** (Supabase, Firebase) | a receptek nem a fájlban, hanem adatbázisban élnek | átírt adatkezelés | ha valós idejű közös szerkesztés kell |
 
-**Amit javaslok:** ha egyedül és a saját eszközödön szerkesztesz, a **B** a jó választás —
-attól még megmarad a kézi mentés is tartaléknak, és az oldal offline jellege sem sérül.
-A **D** ezzel szemben elvenné a gyűjtemény legjobb tulajdonságát: hogy internet nélkül is
-megnyílik, mert a receptekért hálózaton kellene menni.
+A **B** azért lett a választás, mert nem sérti az oldal legjobb tulajdonságát: a receptek
+továbbra is magában a fájlban vannak, tehát internet nélkül is megnyílnak. A **D** ezt
+elvenné, mert a receptekért hálózaton kellene menni.
 
-A **B** változatnál érdemes tudni: a token a böngésző `localStorage`-ában marad, tehát a
-publikus oldal HTML-jébe soha nem kerül bele, viszont aki hozzáér a feloldott telefonodhoz,
-ki tudja olvasni. Ezért kell szűk jogosultságú (csak erre az egy repóra írási jogot adó),
-lejárati idővel ellátott tokent használni.
-
-Ha kell, ez a „☁ Feltöltés" gomb megírható — szólj, és megcsinálom.
+A **C** akkor éri meg, ha többen szerkesztenétek: ott a token egy szerveren ül, a
+szerkesztők csak jelszót kapnak, és visszavonni is elég egy helyen. Szólj, ha erre lenne
+szükség.
 
 ---
 
